@@ -11,6 +11,8 @@ build/
 
 # Claude Code（個人設定）
 .claude/
+CLAUDE.md
+.devcontainer/
 
 # エディタ
 .vscode/
