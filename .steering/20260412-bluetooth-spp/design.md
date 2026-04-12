@@ -281,14 +281,14 @@ void setup() {
 **変更後：**
 ```cpp
 void setup() {
+  Serial.begin(SERIAL_BAUD);              // デバッグ用 ※ M5.begin より前に呼ぶ
   auto cfg = M5.config();
   M5.begin(cfg);
   M5.Lcd.setRotation(0);
   M5.Lcd.setBrightness(160);
   M5.Lcd.fillScreen(COL_BG);
-  SerialBT.setPin(BT_PIN);                 // 追加: PIN 設定（begin より前に呼ぶ）
-  SerialBT.begin(BT_DEVICE_NAME);          // 追加: BT SPP 開始
-  Serial.begin(SERIAL_BAUD);              // デバッグ用（変更なし）
+  SerialBT.setPin(BT_PIN, 4);             // 追加: PIN 設定（begin より前に呼ぶ）※ 2 引数版
+  SerialBT.begin(BT_DEVICE_NAME);         // 追加: BT SPP 開始
 
   uint32_t now      = millis();
   gBoo.sessionStart = now;

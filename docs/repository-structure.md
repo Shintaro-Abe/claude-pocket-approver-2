@@ -20,10 +20,13 @@ claude-pocket-approver-2/
 │   ├── development-guidelines.md    # 開発ガイドライン
 │   └── glossary.md                  # ユビキタス言語定義
 │
+├── README.md                        # ユーザー向けセットアップ・操作ガイド
+│
 ├── src/                             # ソースコード
-│   ├── boo_device.ino               # M5StickC PLUS2 Arduino スケッチ
 │   ├── boo_bridge.py                # PC 側 MCP ブリッジ（Python）
-│   └── README.md                    # ユーザー向けセットアップ・操作ガイド
+│   ├── boo_test.py                  # 手動テスト用スクリプト
+│   └── boo_device/
+│       └── boo_device.ino           # M5StickC PLUS2 Arduino スケッチ
 │
 └── .steering/                       # 作業単位ドキュメント（実装履歴）
     └── [YYYYMMDD]-[タイトル]/
@@ -55,9 +58,9 @@ claude-pocket-approver-2/
 
 | ファイル | ターゲット | 役割 |
 |----------|-----------|------|
-| `boo_device.ino` | M5StickC PLUS2（ESP32） | デバイス側ファームウェア。Bluetooth SPP サーバー、表示、ボタン処理、JSON 通信 |
-| `boo_bridge.py` | WSL2 / PC（Python） | PC 側 MCP ブリッジ。Claude Code との MCP stdio 通信、Bluetooth COM ポート接続、自動再接続 |
-| `README.md` | — | ユーザー向けドキュメント。セットアップ手順・ボタン操作・Boo の表情・パラメータ仕様 |
+| `boo_device/boo_device.ino` | M5StickC PLUS2（ESP32） | デバイス側ファームウェア。Bluetooth SPP サーバー、表示、ボタン処理、JSON 通信 |
+| `boo_bridge.py` | Windows（Python） | PC 側 MCP ブリッジ。Claude Code との MCP stdio 通信、Bluetooth COM ポート接続 |
+| `boo_test.py` | Windows（Python） | 手動テスト用スクリプト。MCP を介さず COM ポートへ直接接続して通信確認 |
 
 ### 2-3. `.steering/` — 作業単位ドキュメント
 
@@ -82,12 +85,12 @@ claude-pocket-approver-2/
 
 | ファイルの種類 | 配置先 | 例 |
 |--------------|--------|-----|
-| Arduino スケッチ（`.ino`） | `src/` | `src/boo_device.ino` |
+| Arduino スケッチ（`.ino`） | `src/boo_device/` | `src/boo_device/boo_device.ino` |
 | Python スクリプト（`.py`） | `src/` | `src/boo_bridge.py` |
-| ユーザー向けドキュメント | `src/README.md` に統合 | — |
-| テストスクリプト | `src/` | `src/test_bridge.py` |
+| ユーザー向けドキュメント | ルート `README.md` に統合 | — |
+| テストスクリプト | `src/` | `src/boo_test.py` |
 
-> **Note:** サブディレクトリは作成しない。`src/` は小規模プロジェクトのため、フラット構成を維持する。
+> **Note:** Arduino スケッチは Arduino IDE の仕様上、スケッチ名と同名のディレクトリが必要なため `src/boo_device/` にのみサブディレクトリを作成する。Python スクリプトは `src/` 直下のフラット構成を維持する。
 
 ### 3-2. ドキュメントの配置
 
@@ -95,7 +98,7 @@ claude-pocket-approver-2/
 |------------------|--------|
 | プロジェクト全体の設計・仕様 | `docs/` |
 | 特定の作業・変更の記録 | `.steering/[YYYYMMDD]-[タイトル]/` |
-| ユーザー操作ガイド | `src/README.md` |
+| ユーザー操作ガイド | ルート `README.md` |
 | Claude Code 用プロジェクト設定 | `CLAUDE.md`（ルート直下） |
 
 ### 3-3. 配置してはいけないもの
@@ -189,9 +192,9 @@ src/
 
 | ファイル | 現在 | 上限目安 |
 |----------|------|---------|
-| `boo_device.ino` | ~600 行（実装後） | 1,000 行 |
+| `boo_device/boo_device.ino` | ~700 行 | 1,000 行 |
 | `boo_bridge.py` | ~340 行 | 500 行 |
-| `src/README.md` | ~390 行 | 制限なし |
+| `README.md`（ルート） | ~400 行 | 制限なし |
 
 > **上限を超える場合：**  
 > `boo_device.ino` はタブ分割（`.h` / `.cpp`）を検討する。ただし Arduino IDE での分割には制約があるため、まず単一ファイルで完結させることを優先する。

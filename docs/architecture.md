@@ -15,7 +15,7 @@
 | 開発環境 | Arduino IDE 2.x | M5Stack 公式サポート。初学者に馴染みやすい |
 | Arduino コア | **esp32 by Espressif 3.x系**（最新安定版） | `BluetoothSerial` の安定性は 2.x 系と 3.x 系で差異あり。3.x 系を推奨 |
 | ボードパッケージ | M5Stack（M5Stack 公式 Board Manager） | M5StickC PLUS2 のピン・ペリフェラル定義を含む |
-| ボード選択 | `M5StickC` | M5Stack ボードパッケージ内の選択肢 |
+| ボード選択 | `M5StickCPlus2` | M5Stack ボードパッケージ内の選択肢 |
 | BT ライブラリ | `BluetoothSerial`（ESP32 コア同梱） | 追加インストール不要。SPP サーバーモードで動作 |
 | 表示ライブラリ | `M5StickCPlus2`（M5Stack 公式） | TFT・ボタン・電源管理を統合 |
 | JSON | `ArduinoJson` **v6.x**（v7.x は API が異なるため非推奨） | `StaticJsonDocument` API が安定。v7 の動的確保は不要 |
@@ -138,7 +138,7 @@ https://m5stack.oss-cn-shenzhen.aliyuncs.com/resource/arduino/package_m5stack_in
 
 | 設定項目 | 値 |
 |---------|-----|
-| ボード | `M5Stack` > `M5StickC` |
+| ボード | `M5Stack` > `M5StickCPlus2` |
 | Upload Speed | `1500000` |
 | Partition Scheme | `Huge APP (3MB No OTA/1MB SPIFFS)` |
 
@@ -180,31 +180,18 @@ python3 -c "import serial, mcp; print('OK')"
 
 ### Step 2. COM ポート番号の確認
 
-1. `デバイスマネージャー`（`Win + X` → `デバイスマネージャー`）を開く
-2. `ポート (COM と LPT)` を展開
-3. `Standard Serial over Bluetooth link (COM**)` を探す  
-   → この `**` の数字が COM ポート番号（例: `COM5`）
+1. `デバイスマネージャー`（`Win + X` → `デバイスマネージャー`）を開く、  
+   または「Bluetooth とデバイス」→「その他の Bluetooth オプション」→「COM ポート」タブを開く
+2. **発信 (Outgoing)** 側の `BooDevice 'ESP32SPP'` の COM 番号を確認する（例: `COM4`）
 
-> **ペアリング後に COM ポートが 2 つ出ることがある**  
-> Windows は Bluetooth SPP デバイスに対して送信用・受信用の 2 ポートを割り当てる場合がある。  
-> 番号が小さい方（または description に "Outgoing" が付く方）を使用すること。
+> **ペアリング後に COM ポートが 2 つ割り当てられる**  
+> Windows は Bluetooth SPP デバイスに対して「着信 (Incoming)」と「発信 (Outgoing)」の 2 ポートを割り当てる。  
+> **発信 (Outgoing)** 側のポートを使用すること。再ペアリング後にポート番号が入れ替わる場合があるため、  
+> 使用前に必ず「発信」側の番号を確認する。
 
-### Step 3. WSL2 でポートを確認
-
-```bash
-# COM5 なら /dev/ttyS5 に対応
-ls -la /dev/ttyS5
-
-# 書き込み権限がない場合は以下で付与（セッション毎に必要）
-sudo chmod 666 /dev/ttyS5
-
-# または dialout グループに追加（恒久的。反映にログアウト/ログインが必要）
-sudo usermod -aG dialout $USER
-```
-
-> **WSL2 で `/dev/ttyS*` が見えない場合**  
-> WSL2 の起動方法や設定によっては COM ポートが `/dev/ttyS*` に現れないことがある。  
-> その場合は `wsl --shutdown` で WSL2 を再起動してから再確認する。
+> **WSL2/Docker から BT COM ポートへのアクセス**  
+> Docker コンテナ（Dev Container）内からは `/dev/ttyS*` 経由での BT COM ポートアクセスができない。  
+> `boo_bridge.py` は **Windows PowerShell 上で直接実行**する必要がある。
 
 ---
 
@@ -212,33 +199,29 @@ sudo usermod -aG dialout $USER
 
 ```
 1. Arduino IDE でスケッチを開く
-        boo_device.ino
+        src/boo_device/boo_device.ino
         ↓
 2. M5StickC PLUS2 を USB 接続
         ↓
-3. ボード設定確認（M5StickC / Huge APP / 1500000bps）
+3. ボード設定確認（M5StickCPlus2 / Huge APP / 1500000bps）
         ↓
 4. スケッチを書き込む
         → 起動すると "BooDevice" が BT アドバタイズを開始
         → 画面に ST_BT_WAIT（Bluetooth 待機画面）が表示される
         ↓
 5. Windows 11 でペアリング（PIN: 1234）
-        → COM ポートが発行される（例: COM5）
+        → 発信 (Outgoing) COM ポートが発行される（例: COM4）
         ↓
-6. WSL2 でポートを確認・権限設定
-        sudo chmod 666 /dev/ttyS5
-        ↓
-7. boo_bridge.py を起動
-        cd /path/to/boo_device
-        source .venv/bin/activate
-        python boo_bridge.py --port /dev/ttyS5
-        → "[boo] Connected to /dev/ttyS5" が出力される
+6. Windows PowerShell で boo_bridge.py を起動
+        pip install pyserial mcp   # 初回のみ
+        python src\boo_bridge.py --port COM4
+        → "[boo] Connected to COM4" が出力される
         → デバイスが ST_IDLE 画面へ遷移することを確認
         ↓
-8. Claude Code に MCP サーバーとして登録
+7. Claude Code に MCP サーバーとして登録
         → ~/.claude/settings.json に追記（次セクション参照）
         ↓
-9. Claude Code を起動して approve_request をテスト
+8. Claude Code を起動して approve_request をテスト
 ```
 
 ---
@@ -247,14 +230,14 @@ sudo usermod -aG dialout $USER
 
 ### 方法 A: settings.json に直接追記
 
-`~/.claude/settings.json`（WSL2 内のホームディレクトリ）に追記：
+`~/.claude/settings.json` に追記：
 
 ```json
 {
   "mcpServers": {
     "boo-approval": {
       "command": "python",
-      "args": ["/path/to/boo_bridge.py", "--port", "/dev/ttyS5"],
+      "args": ["C:\\path\\to\\boo_bridge.py", "--port", "COM4"],
       "env": {}
     }
   }
@@ -264,7 +247,7 @@ sudo usermod -aG dialout $USER
 ### 方法 B: claude mcp add コマンドで登録
 
 ```bash
-claude mcp add boo-approval python /path/to/boo_bridge.py -- --port /dev/ttyS5
+claude mcp add boo-approval python "C:\path\to\boo_bridge.py" --port COM4
 ```
 
 ### 動作確認（モック）
@@ -276,7 +259,7 @@ claude mcp add boo-approval python /path/to/boo_bridge.py -- --port /dev/ttyS5
   "mcpServers": {
     "boo-approval": {
       "command": "python",
-      "args": ["/path/to/boo_bridge.py", "--mock"],
+      "args": ["C:\\path\\to\\boo_bridge.py", "--mock"],
       "env": {}
     }
   }

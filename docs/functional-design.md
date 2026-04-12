@@ -73,21 +73,25 @@ ESP32 の `BluetoothSerial` は `Serial` とほぼ同一の API を持つ。
 | `Serial.write(data)` | `SerialBT.write(data)` | バイト列送信 |
 | `Serial.println()` | `SerialBT.println()` | 改行付き送信 |
 | `Serial.begin(115200)` | `SerialBT.begin("BooDevice")` | 初期化（デバイス名を設定） |
-| *(なし)* | `SerialBT.setPin("1234")` | PIN 設定（begin の前に呼ぶ） |
+| *(なし)* | `SerialBT.setPin("1234", 4)` | PIN 設定（begin の前に呼ぶ）。m5stack v3.3.7 は 2 引数版 |
 | *(なし)* | `SerialBT.connected()` | 接続状態確認（`bool`） |
 
 ### setup() での初期化順序
 
 ```cpp
-// 1. BluetoothSerial（本番通信）を先に初期化する
-//    SerialBT.setPin() は begin() より前に呼ぶ必要がある
-SerialBT.setPin(BT_PIN);          // PIN を設定してからbegin
-SerialBT.begin(BT_DEVICE_NAME);   // デバイス名でアドバタイズ開始
-
-// 2. USB Serial（デバッグ用）
+// 1. USB Serial（デバッグ用）を最初に初期化する
+//    M5.begin() / SerialBT.begin() より前に呼ぶことで出力が確実に動作する
 Serial.begin(SERIAL_BAUD);
 
-Serial.println("[boo] BT ready. waiting for connection...");
+// 2. M5 ハードウェア初期化
+auto cfg = M5.config();
+M5.begin(cfg);
+
+// 3. BluetoothSerial（本番通信）を初期化する
+//    SerialBT.setPin() は begin() より前に呼ぶ必要がある
+//    m5stack v3.3.7 では setPin(const char*, uint8_t) の 2 引数版を使用する
+SerialBT.setPin(BT_PIN, 4);       // PIN 文字列と文字数を指定
+SerialBT.begin(BT_DEVICE_NAME);   // デバイス名でアドバタイズ開始
 ```
 
 ---

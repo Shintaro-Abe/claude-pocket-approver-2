@@ -1,5 +1,5 @@
 /**
- * boo_device.ino  v2.0
+ * boo_device.ino  v2.1
  * Claude Code 許可デバイス — マスコット「ブー (Boo)」
  * M5StickC PLUS2 用
  *
@@ -9,7 +9,8 @@
  *   energy : Claudeが作業するほど消費。スリープ中に回復。
  *   mood   : fed × energy から算出。表情・アニメに反映。
  *
- * ■ 通信プロトコル: JSON over USB Serial (115200bps)
+ * ■ 通信プロトコル: JSON over Bluetooth Classic SPP
+ *   USB Serial (115200bps) はデバッグ出力専用
  *   受信: {"type":"approve","tool":"Bash","details":"...","danger":false,"timeout":30}
  *   受信: {"type":"working","tool":"Bash"}
  *   受信: {"type":"idle"}
@@ -19,6 +20,7 @@
 
 #include <M5StickCPlus2.h>
 #include <ArduinoJson.h>
+#include <BluetoothSerial.h>
 
 // ============================================================
 // 定数
@@ -32,6 +34,9 @@
 #define ANIM_INTERVAL   600     // アニメ更新間隔(ms)
 #define RESULT_SHOW_MS  1400    // 承認/否認結果表示時間(ms)
 #define IDLE_SLEEP_SEC  120     // アイドル→スリープ(秒)
+// ---- Bluetooth ----
+#define BT_DEVICE_NAME  "BooDevice"
+#define BT_PIN          "1234"
 
 // ---- ゲージ上限 ----
 #define FED_MAX         8.0f    // ハート8個
@@ -143,11 +148,20 @@ const AsciiArt ART_TIRED = {{
   " |  tired  | ", "  \\ _____ /  ", "   zzzZZZ    ",
 }, 5, COL_DIM};
 
+// ---- Bluetooth 接続待ち ----
+const AsciiArt ART_BT_WAIT = {{
+  "   .-\"\"-.   ", "  / - ~ - \\  ",
+  " |   ...   | ", "  \\ _____ /  ", " waiting...  ",
+}, 5, COL_DIM};
+
 // ============================================================
 // ステートマシン
 // ============================================================
+BluetoothSerial SerialBT;
+
 enum DeviceState {
-  ST_BOOT, ST_IDLE, ST_SLEEP,
+  ST_BOOT, ST_BT_WAIT,
+  ST_IDLE, ST_SLEEP,
   ST_APPROVAL, ST_WORKING,
   ST_APPROVED, ST_DENIED, ST_STATS
 };
@@ -347,6 +361,8 @@ const AsciiArt* pickIdleArt(uint8_t frame) {
 // ============================================================
 void drawIdleScreen() {
   cls();
+  // BT 接続インジケーター（右上隅、アイドル画面のみ）
+  drawText(111, 0, COL_BOO, 1, "BT");
   drawArt(*pickIdleArt(gAnimIdx), MASCOT_Y);
 
   uint32_t lv = 1 + gBoo.approved / 10;
@@ -488,6 +504,44 @@ void drawStatsScreen() {
 }
 
 // ============================================================
+// 画面描画 — Bluetooth 接続待ち
+// ============================================================
+void drawBtWaitScreen() {
+  cls();
+  drawArt(ART_BT_WAIT, MASCOT_Y);
+  hline(82);
+  drawText(4,  88, COL_INFO, 1, BT_DEVICE_NAME);
+  drawText(4, 100, COL_DIM,  1, gFlash ? "waiting BT..." : "             ");
+  drawText(4, 112, COL_DIM,  1, "pair PIN: " BT_PIN);
+  hline(124);
+  drawText(4, 130, COL_DIM,  1, "connect via");
+  drawText(4, 140, COL_BOO,  1, "Bluetooth SPP");
+}
+
+// ============================================================
+// Bluetooth 接続状態チェック（loop() 冒頭で毎フレーム呼び出す）
+// ============================================================
+void checkBtConnection() {
+  bool connected = SerialBT.connected();
+
+  // 接続中 → 切断を検知: ST_BT_WAIT へ遷移
+  if (!connected && gState != ST_BT_WAIT && gState != ST_BOOT) {
+    Serial.println("[debug] BT disconnected");
+    gState = ST_BT_WAIT;
+    drawBtWaitScreen();
+    return;
+  }
+
+  // 切断中 → 再接続を検知: ST_IDLE へ遷移
+  if (connected && gState == ST_BT_WAIT) {
+    Serial.println("[debug] BT reconnected");
+    gState      = ST_IDLE;
+    gLastIdleMs = millis();
+    drawIdleScreen();
+  }
+}
+
+// ============================================================
 // 起動アニメ
 // ============================================================
 void bootAnimation() {
@@ -499,7 +553,7 @@ void bootAnimation() {
   M5.Lcd.setTextSize(1);
   M5.Lcd.setTextColor(COL_DIM, COL_BG);
   M5.Lcd.setCursor(14, 80); M5.Lcd.print("Claude Code Guard");
-  M5.Lcd.setCursor(20, 96); M5.Lcd.print("v2.0  M5StickC+2");
+  M5.Lcd.setCursor(20, 96); M5.Lcd.print("v2.1  M5StickC+2");
   delay(600);
   for (int16_t y = 220; y > MASCOT_Y; y -= 14) {
     cls(); drawArt(ART_LOVE, y); delay(25);
@@ -514,8 +568,9 @@ void bootAnimation() {
 void sendJson(bool approved) {
   StaticJsonDocument<64> doc;
   doc["approved"] = approved;
-  serializeJson(doc, Serial);
-  Serial.println();
+  serializeJson(doc, SerialBT);
+  SerialBT.println();
+  Serial.printf("[debug] sent approved=%s\n", approved ? "true" : "false");
 }
 
 void processMessage(const char* msg) {
@@ -553,9 +608,10 @@ void processMessage(const char* msg) {
   }
 }
 
-void pollSerial() {
-  while (Serial.available()) {
-    char c = (char)Serial.read();
+void pollBt() {
+  if (gState == ST_BT_WAIT) return;
+  while (SerialBT.available()) {
+    char c = (char)SerialBT.read();
     if (c == '\n' || c == '\r') {
       if (gSerialPos > 0) {
         gSerialBuf[gSerialPos] = '\0';
@@ -572,12 +628,14 @@ void pollSerial() {
 // setup / loop
 // ============================================================
 void setup() {
+  Serial.begin(SERIAL_BAUD);
   auto cfg = M5.config();
   M5.begin(cfg);
   M5.Lcd.setRotation(0);
   M5.Lcd.setBrightness(160);
   M5.Lcd.fillScreen(COL_BG);
-  Serial.begin(SERIAL_BAUD);
+  SerialBT.setPin(BT_PIN, 4);
+  SerialBT.begin(BT_DEVICE_NAME);
 
   uint32_t now      = millis();
   gBoo.sessionStart = now;
@@ -586,13 +644,14 @@ void setup() {
   gLastDecayMs      = now;
 
   bootAnimation();
-  gState = ST_IDLE;
-  drawIdleScreen();
+  gState = ST_BT_WAIT;
+  drawBtWaitScreen();
 }
 
 void loop() {
   M5.update();
-  pollSerial();
+  checkBtConnection();
+  pollBt();
   uint32_t now = millis();
 
   // 毎分の減衰処理（fed 自然減 / energy 状態別増減）
@@ -604,13 +663,16 @@ void loop() {
     gLastFrameMs = now;
     gFlash = !gFlash;
     switch (gState) {
-      case ST_IDLE:     drawIdleScreen();     break;
-      case ST_SLEEP:    drawSleepScreen();    break;
+      case ST_BT_WAIT:  drawBtWaitScreen();  break;
+      case ST_IDLE:     drawIdleScreen();    break;
+      case ST_SLEEP:    drawSleepScreen();   break;
       case ST_APPROVAL: drawApprovalScreen(); break;
-      case ST_WORKING:  drawWorkScreen();     break;
+      case ST_WORKING:  drawWorkScreen();    break;
       default: break;
     }
   }
+
+  if (gState == ST_BT_WAIT) return;
 
   // ---- 承認リクエスト処理 ----
   if (gState == ST_APPROVAL) {
