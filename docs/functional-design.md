@@ -749,7 +749,7 @@ struct AsciiArt {
 
 ```cpp
 DeviceState  gState;         // 現在のステート
-BooParams    gBoo;           // たまごっちパラメータ
+BooParams    gBoo;           // 育成パラメータ
 ApprovalReq  gReq;           // 承認リクエスト（ST_APPROVAL 中のみ有効）
 char         gSerialBuf[256]; // BT 受信バッファ（最大 255 + NULL）
 uint16_t     gSerialPos;

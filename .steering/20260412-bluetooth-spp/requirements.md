@@ -32,7 +32,7 @@
 ### 変更不要な箇所
 
 - 全描画関数（`drawIdleScreen()` / `drawApprovalScreen()` など）
-- たまごっちパラメータ処理（`tickDecay()` / `addFed()` / `addEnergy()`）
+- 育成パラメータ処理（`tickDecay()` / `addFed()` / `addEnergy()`）
 - `processMessage()` の中身（JSON の解釈ロジック）
 - `gSerialBuf[384]` / `gSerialPos` のバッファ管理ロジック
 - ボタン操作ハンドリング
@@ -257,7 +257,7 @@ So that 接続切断のたびにデバイスを再起動しなくていい。
 | AC-COMM-04 | USB Serial モニター（115200bps）にデバッグログが出力される | Arduino Serial Monitor で確認 |
 | AC-COMM-05 | USB Serial モニターに JSON 文字列が**混入しない** | Arduino Serial Monitor で確認 (`{"approved":...}` が出ないこと) |
 
-### たまごっち・状態遷移
+### 育成・状態遷移
 
 | AC-ID | 条件 | 測定方法 |
 |-------|------|---------|
