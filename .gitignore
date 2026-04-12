@@ -1,0 +1,22 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Arduino IDE
+build/
+*.bin
+*.elf
+
+# Claude Code（個人設定）
+.claude/
+
+# エディタ
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
