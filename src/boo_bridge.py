@@ -3,20 +3,23 @@
 boo_bridge.py
 Claude Code ↔ ブー(Boo)デバイス ブリッジスクリプト
 
-使い方:
-  1. M5StickC PLUS2 を USB 接続する
-  2. python boo_bridge.py [--port /dev/cu.usbserial-XXXX]
-  3. Claude Code の設定で MCP サーバーとして登録する
+使い方 (stdio モード):
+  python boo_bridge.py --port COM4
+  → Claude Code の settings.json に command/args で登録する
+
+使い方 (SSE モード):
+  python boo_bridge.py --port COM4 --transport sse [--http-port 8765]
+  → Dev Container の settings.json に url: http://host.docker.internal:8765/sse を登録する
 
 MCP ツール:
   - approve_request(tool, details, danger, timeout) → {approved: bool}
   - notify_working(tool_name)
   - notify_idle()
   - update_tokens(total, today)
-  - get_stats()
 
 依存ライブラリ:
-  pip install pyserial mcp
+  pip install pyserial mcp                         # stdio モード
+  pip install pyserial mcp starlette uvicorn       # SSE モード
 """
 
 import asyncio
@@ -276,6 +279,55 @@ def build_mcp_server(device: BooDevice) -> Server:
 
 
 # ============================================================
+# SSE トランスポート
+# ============================================================
+async def _run_sse(server: Server, port: int):
+    """SSE トランスポートで MCP サーバーを起動する (starlette + uvicorn)"""
+    try:
+        from mcp.server.sse import SseServerTransport
+        from starlette.applications import Starlette
+        from starlette.routing import Route
+        import uvicorn
+    except ImportError as e:
+        print(
+            f"[boo] ERROR: SSE モードには追加パッケージが必要です: {e}\n"
+            "  pip install starlette uvicorn",
+            file=sys.stderr
+        )
+        sys.exit(1)
+
+    sse_transport = SseServerTransport("/messages")
+
+    async def handle_sse(request):
+        async with sse_transport.connect_sse(
+            request.scope, request.receive, request._send
+        ) as streams:
+            await server.run(
+                streams[0], streams[1],
+                server.create_initialization_options()
+            )
+
+    async def handle_messages(request):
+        await sse_transport.handle_post_message(
+            request.scope, request.receive, request._send
+        )
+
+    app = Starlette(routes=[
+        Route("/sse", endpoint=handle_sse),
+        Route("/messages", endpoint=handle_messages, methods=["POST"]),
+    ])
+
+    print(
+        f"[boo] MCP server starting (SSE on 0.0.0.0:{port})...\n"
+        f"[boo] SSE endpoint: http://0.0.0.0:{port}/sse",
+        file=sys.stderr
+    )
+    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="warning")
+    uv_server = uvicorn.Server(config)
+    await uv_server.serve()
+
+
+# ============================================================
 # エントリポイント
 # ============================================================
 async def main():
@@ -296,6 +348,17 @@ async def main():
         "--mock",
         action="store_true",
         help="デバイスなしでモック動作 (テスト用)"
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "sse"],
+        default="stdio",
+        help="MCP トランスポート (stdio | sse, デフォルト: stdio)"
+    )
+    parser.add_argument(
+        "--http-port",
+        type=int, default=8765,
+        help="SSE トランスポートのリッスンポート (デフォルト: 8765)"
     )
     args = parser.parse_args()
 
@@ -329,12 +392,15 @@ async def main():
 
     server = build_mcp_server(device)
 
-    print("[boo] MCP server starting (stdio)...", file=sys.stderr)
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream, write_stream,
-            server.create_initialization_options()
-        )
+    if args.transport == "sse":
+        await _run_sse(server, args.http_port)
+    else:
+        print("[boo] MCP server starting (stdio)...", file=sys.stderr)
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(
+                read_stream, write_stream,
+                server.create_initialization_options()
+            )
 
 
 if __name__ == "__main__":

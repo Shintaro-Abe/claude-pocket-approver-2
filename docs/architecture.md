@@ -34,13 +34,17 @@
 |------|---------|-----------|---------|
 | 実行環境 | Python | **3.10 以上** | `match` 文・型ヒント強化。asyncio の安定版 |
 | シリアル通信 | `pyserial` | **>=3.5** | COM ポート（/dev/ttyS*）の読み書き。BT COM ポートも同一 API |
-| MCP フレームワーク | `mcp` | **>=1.0** | Claude Code との MCP stdio 連携 |
+| MCP フレームワーク | `mcp` | **>=1.0** | Claude Code との MCP stdio/SSE 連携 |
 | 非同期 | `asyncio`（標準ライブラリ） | Python 3.10 以上 | 承認待機の `await` に使用 |
 | スレッド | `threading`（標準ライブラリ） | — | シリアル受信をバックグラウンドで監視 |
+| HTTP サーバー（SSE モード） | `starlette` + `uvicorn` | 最新安定版 | Dev Container から接続する SSE トランスポート |
 
 ```bash
-# 依存インストール
+# 依存インストール（stdio モード）
 pip install "pyserial>=3.5" "mcp>=1.0"
+
+# 依存インストール（SSE モード：Dev Container 環境）
+pip install "pyserial>=3.5" "mcp>=1.0" starlette uvicorn
 ```
 
 ---
@@ -213,8 +217,14 @@ python3 -c "import serial, mcp; print('OK')"
         → 発信 (Outgoing) COM ポートが発行される（例: COM4）
         ↓
 6. Windows PowerShell で boo_bridge.py を起動
+        # stdio モード（Windows ネイティブ Claude Code 用）
         pip install pyserial mcp   # 初回のみ
         python src\boo_bridge.py --port COM4
+
+        # SSE モード（Dev Container 内 Claude Code 用）
+        pip install pyserial mcp starlette uvicorn   # 初回のみ
+        python src\boo_bridge.py --port COM4 --transport sse
+
         → "[boo] Connected to COM4" が出力される
         → デバイスが ST_IDLE 画面へ遷移することを確認
         ↓
@@ -228,7 +238,7 @@ python3 -c "import serial, mcp; print('OK')"
 
 ## 8. Claude Code への MCP 登録
 
-### 方法 A: settings.json に直接追記
+### 方法 A: stdio トランスポート（Windows ネイティブ Claude Code）
 
 `~/.claude/settings.json` に追記：
 
@@ -244,10 +254,46 @@ python3 -c "import serial, mcp; print('OK')"
 }
 ```
 
-### 方法 B: claude mcp add コマンドで登録
+または `claude mcp add` で登録：
 
 ```bash
 claude mcp add boo-approval python "C:\path\to\boo_bridge.py" --port COM4
+```
+
+### 方法 B: SSE トランスポート（Dev Container 内 Claude Code）
+
+Dev Container 環境では stdio MCP から COM ポートへのアクセスができない。  
+代わりに Windows PowerShell で `boo_bridge.py` を SSE モードで起動し、  
+Dev Container 内の Claude Code から `host.docker.internal` 経由で接続する。
+
+**Step 1. Windows PowerShell で SSE サーバーを起動**
+
+```powershell
+python src\boo_bridge.py --port COM4 --transport sse
+# → [boo] MCP server starting (SSE on 0.0.0.0:8765)...
+```
+
+**Step 2. Dev Container 内の `~/.claude.json` を編集**
+
+`projects["/workspaces/claude-pocket-approver-2"]["mcpServers"]` に追記：
+
+```json
+"mcpServers": {
+  "boo-approval": {
+    "type": "sse",
+    "url": "http://host.docker.internal:8765/sse"
+  }
+}
+```
+
+> **注意：** MCP サーバーは `~/.claude/settings.json` ではなく `~/.claude.json` の  
+> `projects.<project-path>.mcpServers` に登録する。`settings.json` は `mcpServers` フィールドを受け付けない。
+
+**Step 3. Claude Code を再起動して MCP 接続を確認**
+
+```
+/mcp
+# boo-approval が "connected" と表示されることを確認
 ```
 
 ### 動作確認（モック）
@@ -264,6 +310,12 @@ claude mcp add boo-approval python "C:\path\to\boo_bridge.py" --port COM4
     }
   }
 }
+```
+
+SSE モックで確認する場合（デバイスなし）：
+
+```powershell
+python src\boo_bridge.py --mock --transport sse
 ```
 
 ---
