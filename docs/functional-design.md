@@ -7,43 +7,76 @@
 
 ## 1. システム全体アーキテクチャ
 
+### 1-1. Dev Container 環境（SSE モード + PreToolUse フック）
+
 ```
-┌──────────────────────────────────────────────────────────────┐
-│ WSL2                                                         │
-│                                                              │
-│  ┌────────────────┐   MCP(stdio)  ┌──────────────────────┐  │
-│  │  Claude Code   │◄─────────────►│   boo_bridge.py      │  │
-│  │                │               │   (MCP Server)        │  │
-│  └────────────────┘               │                      │  │
-│                                   │  BooDevice (class)   │  │
-│                                   │  ・_send(json)        │  │
-│                                   │  ・_reader (thread)   │  │
-│                                   │  ・request_approval() │  │
-│                                   └──────────┬───────────┘  │
-│                                              │ pyserial      │
-│                                         /dev/ttyS5           │
-└──────────────────────────────────────────────┼───────────────┘
-                                               │ (Windows COM5)
-┌──────────────────────────────────────────────┼───────────────┐
-│ Windows 11                                   │               │
-│                              仮想 COM ポート (COM5)          │
-│                              Bluetooth SPP ドライバ          │
-└──────────────────────────────────────────────┼───────────────┘
-                                               │ Bluetooth Classic SPP
-┌──────────────────────────────────────────────┼───────────────┐
-│ M5StickC PLUS2                               │               │
-│                                              │               │
-│  BluetoothSerial SerialBT ("BooDevice")◄─────┘               │
-│  ┌──────────────────────────────────────────────────────┐    │
-│  │ boo_device.ino                                       │    │
-│  │  pollBt()         ← JSON 受信                        │    │
-│  │  sendJson()       → JSON 送信                        │    │
-│  │  checkBtConnection() ← 接続断検知 (polling)          │    │
-│  │  State Machine (ST_BT_WAIT / ST_IDLE / ...)          │    │
-│  └──────────────────────────────────────────────────────┘    │
-│                                                              │
-│  USB Serial (115200) → デバッグログ出力のみ（受信なし）      │
-└──────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ Dev Container (Docker on WSL2)                                   │
+│                                                                  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  Claude Code                                             │   │
+│  │                                                          │   │
+│  │  ① PreToolUse フック（Bash 実行前に発火）                 │   │
+│  │    └─ boo_hook.sh                                        │   │
+│  │         └─ POST http://host.docker.internal:8765/request │   │
+│  │                                                          │   │
+│  │  ② MCP ツール（手動呼び出し）                             │   │
+│  │    └─ boo-approval MCP (SSE)                             │   │
+│  │         └─ http://host.docker.internal:8765/sse          │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │ host.docker.internal:8765
+┌────────────────────────────┼─────────────────────────────────────┐
+│ Windows 11 (PowerShell)    │                                     │
+│                            ▼                                     │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  boo_bridge.py (SSE モード、ポート 8765)                 │    │
+│  │                                                         │    │
+│  │  /sse     ← MCP SSE エンドポイント                      │    │
+│  │  /request ← REST 承認エンドポイント（フックから呼ばれる） │    │
+│  │                                                         │    │
+│  │  BooDevice                                              │    │
+│  │  ・_approval_lock（同時リクエスト直列化）                 │    │
+│  │  ・_send(json)                                           │    │
+│  │  ・_reader (thread)                                      │    │
+│  │  ・request_approval()                                    │    │
+│  └──────────────────────────────┬──────────────────────────┘    │
+│                                 │ pyserial (COM4)                │
+│                    仮想 COM ポート (COM4)                         │
+│                    Bluetooth SPP ドライバ                        │
+└─────────────────────────────────┼────────────────────────────────┘
+                                  │ Bluetooth Classic SPP
+┌─────────────────────────────────┼────────────────────────────────┐
+│ M5StickC PLUS2                  │                                │
+│                                 │                                │
+│  BluetoothSerial SerialBT ("BooDevice")◄───────────────────────  │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ boo_device.ino                                           │   │
+│  │  pollBt()            ← JSON 受信                         │   │
+│  │  sendJson()          → JSON 送信                         │   │
+│  │  checkBtConnection() ← 接続断検知 (polling)              │   │
+│  │  State Machine (ST_BT_WAIT / ST_IDLE / ...)              │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  USB Serial (115200) → デバッグログ出力のみ（受信なし）          │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 1-2. Windows ネイティブ環境（stdio モード）
+
+```
+┌──────────────────────────────────────────────────────┐
+│ Windows 11                                           │
+│                                                      │
+│  ┌────────────────┐  MCP(stdio)  ┌────────────────┐  │
+│  │  Claude Code   │◄────────────►│  boo_bridge.py │  │
+│  │  (Windows)     │              │  (stdio モード) │  │
+│  └────────────────┘              └───────┬────────┘  │
+│                                          │ pyserial  │
+│                              仮想 COM ポート (COM4)   │
+└──────────────────────────────────────────┼───────────┘
+                                           │ Bluetooth Classic SPP
+                                    M5StickC PLUS2
 ```
 
 ---
@@ -272,7 +305,41 @@ Claude Code     boo_bridge.py       /dev/ttyS5(BT)    M5StickC PLUS2
     │{approved:false} │                   │                   │
 ```
 
-### 7-3. 再接続フロー
+### 7-3. PreToolUse フックによる自動承認フロー
+
+```
+Claude Code         boo_hook.sh      boo_bridge.py    M5StickC PLUS2
+    │                    │                 │                 │
+    │ Bash 実行前         │                 │                 │
+    │ フック発火          │                 │                 │
+    │ stdin: tool payload │                 │                 │
+    │───────────────────►│                 │                 │
+    │                    │ POST /request   │                 │
+    │                    │────────────────►│                 │
+    │                    │                 │ _send(JSON)     │
+    │                    │                 │────────────────►│
+    │                    │                 │            drawApprovalScreen()
+    │                    │                 │                 │
+    │                    │                 │   ユーザーがボタンA押下
+    │                    │                 │◄────────────────│
+    │                    │                 │ return T        │
+    │                    │ {approved:true} │                 │
+    │                    │◄────────────────│                 │
+    │ permissionDecision │                 │                 │
+    │  : "allow"         │                 │                 │
+    │◄───────────────────│                 │                 │
+    │ Bash コマンド実行   │                 │                 │
+```
+
+**boo_hook.sh 未起動時（フェイルオープン）:**  
+curl が接続失敗 → `[boo_hook] Warning: boo server unreachable` を stderr に出力 → `allow` を返す → Bash 実行
+
+**ボタンB（否認）時:**  
+`{approved:false}` → `permissionDecision: "deny"` → Bash ブロック
+
+---
+
+### 7-4. 再接続フロー
 
 ```
 boo_bridge.py               /dev/ttyS5(BT)    M5StickC PLUS2
@@ -366,11 +433,12 @@ BooDevice
 ├── port: str
 ├── baud: int
 ├── _ser: serial.Serial | None
-├── _lock: threading.Lock           # _send の排他制御
-├── _pending: asyncio.Future | None # 応答待ちの承認リクエスト
+├── _lock: threading.Lock             # _send の排他制御
+├── _approval_lock: asyncio.Lock      # 同時承認リクエストを直列化
+├── _pending: asyncio.Future | None   # 応答待ちの承認リクエスト
 ├── _loop: asyncio.AbstractEventLoop
 ├── _read_thread: threading.Thread
-└── _connected: bool                # 再接続ループ制御用
+└── _connected: bool                  # 再接続ループ制御用
 
 主要フロー:
   connect() → _reader thread 起動

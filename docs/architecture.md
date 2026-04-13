@@ -229,9 +229,14 @@ python3 -c "import serial, mcp; print('OK')"
         → デバイスが ST_IDLE 画面へ遷移することを確認
         ↓
 7. Claude Code に MCP サーバーとして登録
-        → ~/.claude/settings.json に追記（次セクション参照）
+        → 次セクション参照
         ↓
-8. Claude Code を起動して approve_request をテスト
+8. PreToolUse フックを設定（Dev Container のみ）
+        → .claude/settings.json に hooks 設定を追記（次セクション参照）
+        ↓
+9. Claude Code を起動して動作確認
+        MCP: /mcp で boo-approval が connected と表示されることを確認
+        フック: Bash コマンド実行時に M5StickC PLUS2 に承認画面が表示されることを確認
 ```
 
 ---
@@ -320,7 +325,64 @@ python src\boo_bridge.py --mock --transport sse
 
 ---
 
-## 9. パフォーマンス要件と検証方法
+## 9. PreToolUse フック設定（Dev Container 環境）
+
+Claude Code が Bash ツールを実行する前に自動的に Boo デバイスで承認を求めるフックを設定する。
+
+### 仕組み
+
+```
+Claude Code が Bash 実行しようとする
+  → boo_hook.sh が呼ばれる（PreToolUse フック）
+  → POST http://host.docker.internal:8765/request
+  → boo_bridge.py が承認リクエストをデバイスに送信
+  → ユーザーがボタンA（承認）またはボタンB（否認）を押す
+  → 承認: Bash 実行 / 否認: Bash ブロック
+```
+
+### Step 1. `.claude/settings.json` を作成
+
+プロジェクトルートの `.claude/settings.json` に以下を記述：
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /workspaces/claude-pocket-approver-2/src/boo_hook.sh",
+            "timeout": 35,
+            "statusMessage": "Boo に承認を要求中..."
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+> **注意：** `.claude/` は `.gitignore` に含まれるため、`settings.json` はコミット対象外。  
+> また Claude Code は `settings.local.json` を権限管理に使用するため、フック設定には `settings.json` を使うこと。
+
+### Step 2. 動作確認
+
+Claude Code を再起動後、Bash コマンドの実行を依頼するとフックが発火する。
+
+### 依存スクリプト: `src/boo_hook.sh`
+
+| 項目 | 値 |
+|------|----|
+| ファイル | `src/boo_hook.sh` |
+| 依存コマンド | `curl`, `jq`（Dev Container に標準インストール済み） |
+| 危険パターン検出 | `rm `, `git push --force`, `git reset --hard` など |
+| フェイルオープン | boo_bridge.py 未起動時は警告を出して操作を許可 |
+
+---
+
+## 10. パフォーマンス要件と検証方法
 
 | 要件 | 目標値 | 検証方法 |
 |------|--------|---------|
@@ -332,7 +394,7 @@ python src\boo_bridge.py --mock --transport sse
 
 ---
 
-## 10. 技術的制約と既知の注意点
+## 11. 技術的制約と既知の注意点
 
 | 制約 | 内容 | 対応策 |
 |------|------|--------|

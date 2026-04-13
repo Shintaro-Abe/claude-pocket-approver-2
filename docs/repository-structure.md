@@ -24,9 +24,14 @@ claude-pocket-approver-2/
 │
 ├── src/                             # ソースコード
 │   ├── boo_bridge.py                # PC 側 MCP ブリッジ（Python）
+│   ├── boo_hook.sh                  # Claude Code PreToolUse フック（bash）
 │   ├── boo_test.py                  # 手動テスト用スクリプト
 │   └── boo_device/
 │       └── boo_device.ino           # M5StickC PLUS2 Arduino スケッチ
+│
+├── .claude/                         # Claude Code プロジェクト設定（gitignore）
+│   ├── settings.json                # フック設定（PreToolUse）
+│   └── settings.local.json          # 権限設定（Claude Code が自動管理）
 │
 └── .steering/                       # 作業単位ドキュメント（実装履歴）
     └── [YYYYMMDD]-[タイトル]/
@@ -59,7 +64,8 @@ claude-pocket-approver-2/
 | ファイル | ターゲット | 役割 |
 |----------|-----------|------|
 | `boo_device/boo_device.ino` | M5StickC PLUS2（ESP32） | デバイス側ファームウェア。Bluetooth SPP サーバー、表示、ボタン処理、JSON 通信 |
-| `boo_bridge.py` | Windows（Python） | PC 側 MCP ブリッジ。Claude Code との MCP stdio 通信、Bluetooth COM ポート接続 |
+| `boo_bridge.py` | Windows（Python） | PC 側 MCP ブリッジ。MCP stdio/SSE、REST `/request` エンドポイント、Bluetooth COM ポート接続 |
+| `boo_hook.sh` | Dev Container（bash） | Claude Code PreToolUse フック。Bash 実行前に `/request` を呼び出して承認を要求 |
 | `boo_test.py` | Windows（Python） | 手動テスト用スクリプト。MCP を介さず COM ポートへ直接接続して通信確認 |
 
 ### 2-3. `.steering/` — 作業単位ドキュメント
@@ -87,6 +93,7 @@ claude-pocket-approver-2/
 |--------------|--------|-----|
 | Arduino スケッチ（`.ino`） | `src/boo_device/` | `src/boo_device/boo_device.ino` |
 | Python スクリプト（`.py`） | `src/` | `src/boo_bridge.py` |
+| シェルスクリプト（`.sh`） | `src/` | `src/boo_hook.sh` |
 | ユーザー向けドキュメント | ルート `README.md` に統合 | — |
 | テストスクリプト | `src/` | `src/boo_test.py` |
 
@@ -179,11 +186,11 @@ docs/
     development-guidelines.md
 
 src/
-    boo_device.ino      ←→     src/boo_bridge.py
-    （ESP32 BT SPP）   JSON     （WSL2 Python MCP）
-         ↑                              ↑
-    functional-design.md          functional-design.md
-    architecture.md               architecture.md
+    boo_device.ino      ←→     src/boo_bridge.py  ←─── src/boo_hook.sh
+    （ESP32 BT SPP）   JSON     （Windows Python）  REST  （Dev Container）
+         ↑                              ↑                       ↑
+    functional-design.md          functional-design.md    architecture.md
+    architecture.md               architecture.md         (セクション 9)
 ```
 
 ---
@@ -193,7 +200,8 @@ src/
 | ファイル | 現在 | 上限目安 |
 |----------|------|---------|
 | `boo_device/boo_device.ino` | ~700 行 | 1,000 行 |
-| `boo_bridge.py` | ~340 行 | 500 行 |
+| `boo_bridge.py` | ~410 行 | 500 行 |
+| `boo_hook.sh` | ~70 行 | 150 行 |
 | `README.md`（ルート） | ~400 行 | 制限なし |
 
 > **上限を超える場合：**  

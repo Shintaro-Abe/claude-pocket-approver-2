@@ -47,6 +47,7 @@ class BooDevice:
         self._pending: Optional[asyncio.Future] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._read_thread: Optional[threading.Thread] = None
+        self._approval_lock = asyncio.Lock()  # 同時承認リクエストを直列化
 
     def connect(self) -> bool:
         try:
@@ -118,22 +119,23 @@ class BooDevice:
         danger: bool = False,
         timeout: int = 30
     ) -> bool:
-        """承認リクエストを送信し、結果を待つ"""
-        fut = asyncio.get_event_loop().create_future()
-        self._pending = fut
-        self._send({
-            "type":    "approve",
-            "tool":    tool[:47],
-            "details": details[:95],
-            "danger":  danger,
-            "timeout": timeout
-        })
-        try:
-            approved = await asyncio.wait_for(fut, timeout=timeout + 5)
-            return approved
-        except asyncio.TimeoutError:
-            self._pending = None
-            return False
+        """承認リクエストを送信し、結果を待つ（同時リクエストは直列化）"""
+        async with self._approval_lock:
+            fut = asyncio.get_event_loop().create_future()
+            self._pending = fut
+            self._send({
+                "type":    "approve",
+                "tool":    tool[:47],
+                "details": details[:95],
+                "danger":  danger,
+                "timeout": timeout
+            })
+            try:
+                approved = await asyncio.wait_for(fut, timeout=timeout + 5)
+                return approved
+            except asyncio.TimeoutError:
+                self._pending = None
+                return False
 
     def notify_working(self, tool_name: str = ""):
         self._send({"type": "working", "tool": tool_name})
@@ -281,12 +283,13 @@ def build_mcp_server(device: BooDevice) -> Server:
 # ============================================================
 # SSE トランスポート
 # ============================================================
-async def _run_sse(server: Server, port: int):
+async def _run_sse(server: Server, device, port: int):
     """SSE トランスポートで MCP サーバーを起動する (starlette + uvicorn)"""
     try:
         from mcp.server.sse import SseServerTransport
         from starlette.applications import Starlette
         from starlette.routing import Route
+        from starlette.responses import JSONResponse
         import uvicorn
     except ImportError as e:
         print(
@@ -312,9 +315,24 @@ async def _run_sse(server: Server, port: int):
             request.scope, request.receive, request._send
         )
 
+    async def handle_request(request):
+        """PreToolUse フックから呼ばれる REST 承認エンドポイント"""
+        try:
+            body = await request.json()
+            approved = await device.request_approval(
+                tool    = body.get("tool", "unknown"),
+                details = body.get("details", ""),
+                danger  = bool(body.get("danger", False)),
+                timeout = int(body.get("timeout", 30)),
+            )
+            return JSONResponse({"approved": approved})
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
     app = Starlette(routes=[
-        Route("/sse", endpoint=handle_sse),
+        Route("/sse",      endpoint=handle_sse),
         Route("/messages", endpoint=handle_messages, methods=["POST"]),
+        Route("/request",  endpoint=handle_request,  methods=["POST"]),
     ])
 
     print(
@@ -393,7 +411,7 @@ async def main():
     server = build_mcp_server(device)
 
     if args.transport == "sse":
-        await _run_sse(server, args.http_port)
+        await _run_sse(server, device, args.http_port)
     else:
         print("[boo] MCP server starting (stdio)...", file=sys.stderr)
         async with stdio_server() as (read_stream, write_stream):
