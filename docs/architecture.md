@@ -231,8 +231,8 @@ python3 -c "import serial, mcp; print('OK')"
 7. Claude Code に MCP サーバーとして登録
         → 次セクション参照
         ↓
-8. PreToolUse フックを設定（Dev Container のみ）
-        → .claude/settings.json に hooks 設定を追記（次セクション参照）
+8. フックを設定（Dev Container のみ）
+        → .claude/settings.json に PreToolUse / PostToolUse / Stop フックを追記（次セクション参照）
         ↓
 9. Claude Code を起動して動作確認
         MCP: /mcp で boo-approval が connected と表示されることを確認
@@ -325,19 +325,39 @@ python src\boo_bridge.py --mock --transport sse
 
 ---
 
-## 9. PreToolUse フック設定（Dev Container 環境）
+## 9. フック設定（PreToolUse / PostToolUse / Stop）
 
-Claude Code が Bash ツールを実行する前に自動的に Boo デバイスで承認を求めるフックを設定する。
+Claude Code のフック機能を使って、Boo デバイスと自動連携する。
 
-### 仕組み
+### フック一覧
+
+| フック種別 | スクリプト | 役割 |
+|-----------|-----------|------|
+| PreToolUse (Bash) | `boo_hook.sh` | Bash 実行前に承認リクエストをデバイスに送信 |
+| PostToolUse (全ツール) | `boo_notify.sh working` | ツール完了後にビジーアニメを表示 |
+| Stop | `boo_notify.sh idle` | Claude の応答完了後にアイドル状態に戻す |
+
+### 動作フロー
 
 ```
+[PreToolUse]
 Claude Code が Bash 実行しようとする
-  → boo_hook.sh が呼ばれる（PreToolUse フック）
+  → boo_hook.sh が呼ばれる
   → POST http://host.docker.internal:8765/request
-  → boo_bridge.py が承認リクエストをデバイスに送信
-  → ユーザーがボタンA（承認）またはボタンB（否認）を押す
-  → 承認: Bash 実行 / 否認: Bash ブロック
+  → デバイスに承認画面を表示
+  → ボタンA（承認）: Bash 実行 / ボタンB（否認）: Bash ブロック
+
+[PostToolUse]
+ツール実行完了直後
+  → boo_notify.sh working が呼ばれる
+  → POST http://host.docker.internal:8765/working
+  → デバイスがビジーアニメ（working...）を表示
+
+[Stop]
+Claude が返答の生成を完了したとき
+  → boo_notify.sh idle が呼ばれる
+  → POST http://host.docker.internal:8765/idle
+  → デバイスがアイドル画面に戻る
 ```
 
 ### Step 1. `.claude/settings.json` を作成
@@ -359,6 +379,29 @@ Claude Code が Bash 実行しようとする
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /workspaces/claude-pocket-approver-2/src/boo_notify.sh working",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /workspaces/claude-pocket-approver-2/src/boo_notify.sh idle",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
@@ -371,14 +414,15 @@ Claude Code が Bash 実行しようとする
 
 Claude Code を再起動後、Bash コマンドの実行を依頼するとフックが発火する。
 
-### 依存スクリプト: `src/boo_hook.sh`
+### 依存スクリプト
 
-| 項目 | 値 |
-|------|----|
-| ファイル | `src/boo_hook.sh` |
-| 依存コマンド | `curl`, `jq`（Dev Container に標準インストール済み） |
-| 危険パターン検出 | `rm `, `git push --force`, `git reset --hard` など |
-| フェイルオープン | boo_bridge.py 未起動時は警告を出して操作を許可 |
+| スクリプト | 役割 | 依存コマンド |
+|-----------|------|-------------|
+| `src/boo_hook.sh` | 承認要求（PreToolUse） | `curl`, `jq` |
+| `src/boo_notify.sh` | 作業中/アイドル通知（PostToolUse/Stop） | `curl`, `jq` |
+
+> `curl` と `jq` は Dev Container に標準インストール済み。  
+> `boo_hook.sh` はフェイルオープン設計: boo_bridge.py 未起動時は警告を出して操作を許可する。
 
 ---
 

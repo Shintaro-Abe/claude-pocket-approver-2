@@ -329,10 +329,26 @@ async def _run_sse(server: Server, device, port: int):
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
 
+    async def handle_working(request):
+        """PostToolUse フックから呼ばれる作業中通知エンドポイント"""
+        try:
+            body = await request.json()
+            device.notify_working(body.get("tool", ""))
+            return JSONResponse({"ok": True})
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    async def handle_idle(request):
+        """Stop フックから呼ばれるアイドル通知エンドポイント"""
+        device.notify_idle()
+        return JSONResponse({"ok": True})
+
     app = Starlette(routes=[
         Route("/sse",      endpoint=handle_sse),
         Route("/messages", endpoint=handle_messages, methods=["POST"]),
         Route("/request",  endpoint=handle_request,  methods=["POST"]),
+        Route("/working",  endpoint=handle_working,  methods=["POST"]),
+        Route("/idle",     endpoint=handle_idle,      methods=["POST"]),
     ])
 
     print(
